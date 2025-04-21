@@ -1,6 +1,6 @@
 mod console;
 mod asm_builder;
-mod mem;
+pub mod mem;
 mod interpreter;
 
 use inkwell::module::Module;

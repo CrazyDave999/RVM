@@ -9,6 +9,7 @@
 .endm
 
 .extern FUNC_TABLE
+.extern KERNEL_INFO
 .extern trap_handler
 
 	.global __call_fn
@@ -49,6 +50,11 @@ __call_fn:
 	# pub fn trap_handler(func_index: usize, ctx: *mut usize)
 	mv a0, t0 # func index
 	mv a1, sp # ctx
+
+	# switch stack
+	la t5, KERNEL_INFO
+	ld sp, 0(t5)
+
 	j trap_handler
 
 __call_compiled:
