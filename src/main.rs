@@ -1,3 +1,51 @@
+mod console;
+mod asm_builder;
+mod mem;
+mod interpreter;
+
+use inkwell::module::Module;
+use inkwell::context::Context;
+use inkwell::memory_buffer::MemoryBuffer;
+use inkwell::execution_engine::JitFunction;
+use inkwell::OptimizationLevel;
+
+type MainFunction = unsafe extern "C" fn() -> i32;
+
+
 fn main() {
-    println!("Hello, world!");
+    let ctx = Context::create();
+    // let ir_code = include_str!("../test.ll");
+    // let buffer = MemoryBuffer::create_from_memory_range(ir_code.as_bytes(), "test.ll");
+    // let module = ctx.create_module_from_ir(buffer).unwrap();
+    let buffer = MemoryBuffer::create_from_file("test.bc".as_ref()).unwrap();
+    let module = Module::parse_bitcode_from_buffer(&buffer, &ctx).unwrap();
+
+
+    // println!("Parsed Module: {}", module.get_name().to_str().unwrap());
+    //
+    // for func in module.get_functions() {
+    //     println!("Function name: {}", func.get_name().to_str().unwrap());
+    //
+    //     for basic_block in func.get_basic_blocks() {
+    //         println!("  Basic block:");
+    //
+    //         for instr in basic_block.get_instructions() {
+    //             println!("    {:?}", instr);  // 打印指令
+    //         }
+    //     }
+    // }
+
+    unsafe {
+        let execution_engine = module
+            .create_jit_execution_engine(OptimizationLevel::None)
+            .unwrap();
+        let main_func: JitFunction<MainFunction> = execution_engine
+            .get_function("main")
+            .expect("Could not find the `main` function!");
+
+        // 调用 @main 函数
+        let result = main_func.call();
+
+        println!("The result of `main` is: {}", result);
+    }
 }
