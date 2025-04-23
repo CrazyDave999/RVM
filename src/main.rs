@@ -2,12 +2,16 @@ mod console;
 mod asm_builder;
 pub mod mem;
 mod interpreter;
+pub mod up;
+mod alloc;
 
 use inkwell::module::Module;
 use inkwell::context::Context;
 use inkwell::memory_buffer::MemoryBuffer;
 use inkwell::execution_engine::JitFunction;
 use inkwell::OptimizationLevel;
+
+use mem::FUNC;
 
 type MainFunction = unsafe extern "C" fn() -> i32;
 
@@ -20,20 +24,16 @@ fn main() {
     let buffer = MemoryBuffer::create_from_file("test.bc".as_ref()).unwrap();
     let module = Module::parse_bitcode_from_buffer(&buffer, &ctx).unwrap();
 
+    for func in module.get_functions() {
+        FUNC.exclusive_access().push(func);
+        for bb in func.get_basic_blocks() {
+            for instr in bb.get_instructions() {
 
-    // println!("Parsed Module: {}", module.get_name().to_str().unwrap());
-    //
-    // for func in module.get_functions() {
-    //     println!("Function name: {}", func.get_name().to_str().unwrap());
-    //
-    //     for basic_block in func.get_basic_blocks() {
-    //         println!("  Basic block:");
-    //
-    //         for instr in basic_block.get_instructions() {
-    //             println!("    {:?}", instr);  // 打印指令
-    //         }
-    //     }
-    // }
+            }
+        }
+    }
+
+
 
     unsafe {
         let execution_engine = module

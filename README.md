@@ -4,7 +4,7 @@ The JIT virtual machine for LLVM IR, written in Rust.
 
 Todo list:
 
-- [ ] Parse LLVM IR to basic blocks, etc.
+- [x] Parse LLVM IR to basic blocks, etc.
 - [ ] Interpretive execution 
 - [ ] Compile certain BB
 - [ ] Switch between interpretation and JIT

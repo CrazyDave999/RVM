@@ -1,15 +1,20 @@
+use super::up::UPSafeCell;
+use inkwell::values::FunctionValue;
+use lazy_static::lazy_static;
+
 const FUNC_MAX_NUM: usize = 10000;
 
 /// table of function pointers
 #[no_mangle]
 static mut FUNC_TABLE: [usize; FUNC_MAX_NUM] = [0; FUNC_MAX_NUM];
 
-const KERNEL_INFO_SIZE: usize = 4;
 /// some info of kernel
 #[no_mangle]
-pub static mut KERNEL_INFO: [usize; KERNEL_INFO_SIZE] = [0; KERNEL_INFO_SIZE];
+pub static mut KERNEL_CTX: [usize; 32] = [0; 32];
 
-
-pub fn init() {
-
+lazy_static! {
+    pub static ref FUNC: UPSafeCell<Vec<FunctionValue<'static>>> =
+        unsafe { UPSafeCell::new(Vec::new()) };
 }
+
+pub fn init() {}
