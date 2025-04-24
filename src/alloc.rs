@@ -45,13 +45,13 @@ lazy_static! {
         unsafe { UPSafeCell::new(StackAllocator::new()) };
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn alloc_stack() -> usize {
     let mut inner = STACK_ALLOCATOR.exclusive_access();
     inner.alloc()
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn dealloc_stack() {
     let mut inner = STACK_ALLOCATOR.exclusive_access();
     inner.dealloc();
