@@ -8,7 +8,7 @@ pub extern "C" fn asm_call_fn_handler(fn_index: usize, ctx: *mut usize) {
     let func = &FUNC.exclusive_access()[fn_index];
     let ret = interpret_func(func);
     unsafe extern "C" {
-        fn __interpreter_ret_asm(ret: isize, ctx: *mut usize);
+        fn __interpreter_ret_asm(ret: i64, ctx: *mut usize);
     }
     unsafe {
 

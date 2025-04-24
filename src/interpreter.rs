@@ -1,29 +1,38 @@
+use llvm_ir::{BasicBlock, Instruction, IntPredicate};
+use llvm_ir::{Function, Name, Operand, Terminator};
 use std::collections::HashMap;
-use llvm_ir::{Function, Name, Operand};
-use llvm_ir::Instruction;
 
 pub struct InterpreterContext {
-    pub virt_regs: HashMap<Name, isize>,
+    pub virt_regs: HashMap<Name, i64>,
+    pub stack: Vec<usize>,
+    pub last_bb: Name,
 }
 impl InterpreterContext {
     pub fn new() -> Self {
         InterpreterContext {
             virt_regs: HashMap::new(),
+            stack: Vec::new(),
+            last_bb: Name::from("entry"),
         }
     }
-    pub fn get_operand(&self, op: &Operand) -> isize {
+    pub fn get_operand(&self, op: &Operand) -> i64 {
         match op {
-            Operand::ConstantOperand(c) => {
-                match &**c {
-                    llvm_ir::Constant::Int {
-                        value, ..
-                    } => *value as isize,
-                    _ => panic!("Unsupported constant type"),
+            Operand::ConstantOperand(c) => match &**c {
+                llvm_ir::Constant::Int { bits, value } => {
+                    if *bits < 64 {
+                        let sign_bit = value & (1u64 << (*bits - 1));
+                        if sign_bit != 0 {
+                            (*value | !((1u64 << *bits) - 1)) as i64
+                        } else {
+                            *value as i64
+                        }
+                    } else {
+                        *value as i64
+                    }
                 }
+                _ => panic!("Unsupported constant type"),
             },
-            Operand::LocalOperand{name, ..} => {
-                *self.virt_regs.get(name).unwrap()
-            }
+            Operand::LocalOperand { name, .. } => *self.virt_regs.get(name).unwrap(),
             _ => {
                 panic!("Unsupported operand type");
             }
@@ -31,21 +40,59 @@ impl InterpreterContext {
     }
 }
 
-pub fn interpret_func(func: &Function) -> isize {
+pub fn interpret_func(func: &Function) -> i64 {
     func.parameters.iter().for_each(|param| {
         println!("Parameter: {:?}", param);
     });
     let mut ctx = InterpreterContext::new();
-    for bb in func.basic_blocks.iter() {
-        for inst in bb.instrs.iter() {
-            interpret_inst(inst, &mut ctx);
+    let mut cur_bb = func.get_bb_by_name(&Name::from("entry")).unwrap();
+    loop {
+        interpret_bb(cur_bb, &mut ctx);
+        ctx.last_bb = cur_bb.name.clone();
+        match &cur_bb.term {
+            Terminator::Br(br) => {
+                if let Some(bb) = func.get_bb_by_name(&br.dest) {
+                    cur_bb = bb;
+                } else {
+                    panic!("BasicBlock not found");
+                }
+            }
+            Terminator::CondBr(cond_br) => {
+                let cond = ctx.get_operand(&cond_br.condition);
+                if cond != 0 {
+                    if let Some(bb) = func.get_bb_by_name(&cond_br.true_dest) {
+                        cur_bb = bb;
+                    } else {
+                        panic!("BasicBlock not found");
+                    }
+                } else {
+                    if let Some(bb) = func.get_bb_by_name(&cond_br.false_dest) {
+                        cur_bb = bb;
+                    } else {
+                        panic!("BasicBlock not found");
+                    }
+                }
+            }
+            Terminator::Ret(ret) => {
+                return if let Some(ret_op) = &ret.return_operand {
+                    ctx.get_operand(ret_op)
+                } else {
+                    0
+                };
+            }
+            _ => panic!("Unsupported terminator type"),
         }
     }
-    0
+}
+pub fn interpret_bb(bb: &BasicBlock, ctx: &mut InterpreterContext) {
+    for inst in bb.instrs.iter() {
+        interpret_inst(inst, ctx);
+    }
 }
 
 pub fn interpret_inst(inst: &Instruction, ctx: &mut InterpreterContext) {
     match inst {
+        // Integer binary ops
         Instruction::Add(add) => {
             let lhs = ctx.get_operand(&add.operand0);
             let rhs = ctx.get_operand(&add.operand1);
@@ -80,7 +127,7 @@ pub fn interpret_inst(inst: &Instruction, ctx: &mut InterpreterContext) {
                 panic!("Division by zero");
             }
             let res = lhs / rhs;
-            ctx.virt_regs.insert(udiv.dest.clone(), res as isize);
+            ctx.virt_regs.insert(udiv.dest.clone(), res as i64);
         }
         Instruction::SRem(srem) => {
             let lhs = ctx.get_operand(&srem.operand0);
@@ -98,8 +145,10 @@ pub fn interpret_inst(inst: &Instruction, ctx: &mut InterpreterContext) {
                 panic!("Division by zero");
             }
             let res = lhs % rhs;
-            ctx.virt_regs.insert(urem.dest.clone(), res as isize);
+            ctx.virt_regs.insert(urem.dest.clone(), res as i64);
         }
+
+        // Bitwise binary ops
         Instruction::And(and) => {
             let lhs = ctx.get_operand(&and.operand0);
             let rhs = ctx.get_operand(&and.operand1);
@@ -128,7 +177,7 @@ pub fn interpret_inst(inst: &Instruction, ctx: &mut InterpreterContext) {
             let lhs = ctx.get_operand(&lshr.operand0) as usize;
             let rhs = ctx.get_operand(&lshr.operand1) as usize;
             let res = lhs >> rhs;
-            ctx.virt_regs.insert(lshr.dest.clone(), res as isize);
+            ctx.virt_regs.insert(lshr.dest.clone(), res as i64);
         }
         Instruction::AShr(ashr) => {
             let lhs = ctx.get_operand(&ashr.operand0);
@@ -137,10 +186,46 @@ pub fn interpret_inst(inst: &Instruction, ctx: &mut InterpreterContext) {
             ctx.virt_regs.insert(ashr.dest.clone(), res);
         }
 
+        // LLVM's "other operations" category
+        Instruction::ICmp(icmp) => {
+            let lhs = ctx.get_operand(&icmp.operand0);
+            let rhs = ctx.get_operand(&icmp.operand1);
+            let res = match icmp.predicate {
+                IntPredicate::EQ => (lhs == rhs) as i64,
+                IntPredicate::NE => (lhs != rhs) as i64,
+                IntPredicate::UGT => ((lhs as usize) > (rhs as usize)) as i64,
+                IntPredicate::UGE => ((lhs as usize) >= (rhs as usize)) as i64,
+                IntPredicate::ULT => ((lhs as usize) < (rhs as usize)) as i64,
+                IntPredicate::ULE => ((lhs as usize) <= (rhs as usize)) as i64,
+                IntPredicate::SGT => (lhs > rhs) as i64,
+                IntPredicate::SGE => (lhs >= rhs) as i64,
+                IntPredicate::SLT => (lhs < rhs) as i64,
+                IntPredicate::SLE => (lhs <= rhs) as i64,
+            };
+            ctx.virt_regs.insert(icmp.dest.clone(), res);
+        }
+        Instruction::Phi(phi) => {
+            let mut res = 0;
+            for (op, bb) in phi.incoming_values.iter() {
+                if *bb == ctx.last_bb {
+                    res = ctx.get_operand(op);
+                    break;
+                }
+            }
+            ctx.virt_regs.insert(phi.dest.clone(), res);
+        }
+        Instruction::Select(select) => {
+            let cond = ctx.get_operand(&select.condition);
+            let res = if cond != 0 {
+                ctx.get_operand(&select.true_value)
+            } else {
+                ctx.get_operand(&select.false_value)
+            };
+            ctx.virt_regs.insert(select.dest.clone(), res);
+        }
+
         _ => {
             println!("Unsupported instruction: {:?}", inst);
         }
     }
 }
-
-

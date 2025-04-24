@@ -24,6 +24,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .exclusive_access()
             .insert(func.name.clone(), cur_size);
     }
-    interpret_func(&module.functions[0]);
+    let ret = interpret_func(&module.functions[0]);
+    println!("func: {:?} return: {:?}", module.functions[0].name, ret);
     Ok(())
 }
