@@ -1,3 +1,5 @@
+@.str = private unnamed_addr constant [13 x i8] c"HelloWorld!\0A\00", align 1
+
 define i32 @square(i32 %x) {
 entry:
   %1 = mul i32 %x, %x
@@ -16,5 +18,9 @@ define i32 @main() {
 entry:
   %1 = call i32 @square(i32 5)
   %2 = call i32 @linear(i32 2, i32 %1, i32 3)
+  %call = call signext i32 (ptr, ...) @print(ptr @.str)
+
   ret i32 %2
 }
+
+declare signext i32 @print(ptr noundef, ...) #1

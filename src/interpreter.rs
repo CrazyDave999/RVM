@@ -1,8 +1,10 @@
-use crate::mem::get_fn_by_name;
-use llvm_ir::{BasicBlock, Constant, ConstantRef, Instruction, IntPredicate};
+use crate::mem::get_local_fn_by_name;
+use llvm_ir::{BasicBlock, Constant, Instruction, IntPredicate};
 use llvm_ir::{Function, Name, Operand, Terminator};
 use std::collections::HashMap;
+use std::ffi::CStr;
 use std::sync::Arc;
+use libc::c_char;
 
 pub struct InterpreterContext {
     pub virt_regs: HashMap<Name, i64>,
@@ -20,16 +22,15 @@ impl InterpreterContext {
     pub fn get_operand(&self, op: &Operand) -> i64 {
         match op {
             Operand::ConstantOperand(c) => match &**c {
-                llvm_ir::Constant::Int { bits, value } => {
-                    if *bits < 64 {
-                        let sign_bit = value & (1u64 << (*bits - 1));
-                        if sign_bit != 0 {
-                            (*value | !((1u64 << *bits) - 1)) as i64
-                        } else {
-                            *value as i64
-                        }
+                Constant::Int { bits, value } => {
+                    sign_extend(*bits, *value)
+                }
+                Constant::GlobalReference {name, ..} => {
+                    let global_inner = crate::mem::GLOBAL_PTR.exclusive_access();
+                    if let Some(vec) = global_inner.get(&name.to_string()[1..]) {
+                        vec.as_ptr() as i64
                     } else {
-                        *value as i64
+                        panic!("Global variable not found");
                     }
                 }
                 _ => panic!("Unsupported constant type"),
@@ -245,18 +246,29 @@ pub fn interpret_inst(inst: &Instruction, ctx: &mut InterpreterContext) {
             match call.function.clone().right().unwrap() {
                 Operand::ConstantOperand(const_ref) => match &*const_ref {
                     Constant::GlobalReference { name, .. } => {
-                        let mut new_ctx = InterpreterContext::new();
-                        let func = get_fn_by_name(&name.to_string()[1..]);
-                        func.parameters
-                            .iter()
-                            .zip(call.arguments.iter())
-                            .for_each(|(para, (arg, _))| {
-                                let arg_val = ctx.get_operand(&arg);
-                                new_ctx.virt_regs.insert(para.name.clone(), arg_val);
-                            });
-                        let ret = interpret_func(func, &mut new_ctx);
-                        if let Some(dest) = &call.dest {
-                            ctx.virt_regs.insert(dest.clone(), ret);
+                        if let Some(func) = get_local_fn_by_name(&name.to_string()[1..]) {
+                            let mut new_ctx = InterpreterContext::new();
+                            func.parameters
+                                .iter()
+                                .zip(call.arguments.iter())
+                                .for_each(|(para, (arg, _))| {
+                                    let arg_val = ctx.get_operand(&arg);
+                                    new_ctx.virt_regs.insert(para.name.clone(), arg_val);
+                                });
+                            let ret = interpret_func(func, &mut new_ctx);
+                            if let Some(dest) = &call.dest {
+                                ctx.virt_regs.insert(dest.clone(), ret);
+                            }
+                        } else {
+                            let paras = call
+                                .arguments
+                                .iter()
+                                .map(|(op, _)| ctx.get_operand(op))
+                                .collect::<Vec<i64>>();
+                            let ret = interpret_extern_func(&name.to_string()[1..], paras);
+                            if let Some(dest) = &call.dest {
+                                ctx.virt_regs.insert(dest.clone(), ret);
+                            }
                         }
                     }
                     _ => panic!("Unsupported function type"),
@@ -268,5 +280,38 @@ pub fn interpret_inst(inst: &Instruction, ctx: &mut InterpreterContext) {
         _ => {
             println!("Unsupported instruction: {:?}", inst);
         }
+    }
+}
+
+pub fn interpret_extern_func(name: &str, paras: Vec<i64>) -> i64 {
+    if name == "print" {
+        for para in paras.iter() {
+            unsafe {
+                let mut p = (*para) as *const i64;
+                loop {
+                    if *p == 0 {
+                        break;
+                    }
+                    print!("{}", (*p) as u8 as char);
+                    p = p.add(1);
+                }
+            }
+        }
+        0
+    } else {
+        panic!("Undefined function");
+    }
+}
+
+pub fn sign_extend(bits: u32, value: u64) -> i64 {
+    if bits < 64 {
+        let sign_bit = value & (1u64 << (bits - 1));
+        if sign_bit != 0 {
+            (value | !((1u64 << bits) - 1)) as i64
+        } else {
+            value as i64
+        }
+    } else {
+        value as i64
     }
 }
