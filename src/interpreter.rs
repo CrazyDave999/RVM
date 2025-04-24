@@ -1,6 +1,8 @@
-use llvm_ir::{BasicBlock, Instruction, IntPredicate};
+use crate::mem::get_fn_by_name;
+use llvm_ir::{BasicBlock, Constant, ConstantRef, Instruction, IntPredicate};
 use llvm_ir::{Function, Name, Operand, Terminator};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 pub struct InterpreterContext {
     pub virt_regs: HashMap<Name, i64>,
@@ -45,14 +47,10 @@ impl InterpreterContext {
     }
 }
 
-pub fn interpret_func(func: &Function) -> i64 {
-    func.parameters.iter().for_each(|param| {
-        println!("Parameter: {:?}", param);
-    });
-    let mut ctx = InterpreterContext::new();
+pub fn interpret_func(func: Arc<Function>, ctx: &mut InterpreterContext) -> i64 {
     let mut cur_bb = func.get_bb_by_name(&Name::from("entry")).unwrap();
     loop {
-        interpret_bb(cur_bb, &mut ctx);
+        interpret_bb(cur_bb, ctx);
         ctx.last_bb = cur_bb.name.clone();
         match &cur_bb.term {
             Terminator::Br(br) => {
@@ -242,6 +240,29 @@ pub fn interpret_inst(inst: &Instruction, ctx: &mut InterpreterContext) {
                 ctx.get_operand(&select.false_value)
             };
             ctx.virt_regs.insert(select.dest.clone(), res);
+        }
+        Instruction::Call(call) => {
+            match call.function.clone().right().unwrap() {
+                Operand::ConstantOperand(const_ref) => match &*const_ref {
+                    Constant::GlobalReference { name, .. } => {
+                        let mut new_ctx = InterpreterContext::new();
+                        let func = get_fn_by_name(&name.to_string()[1..]);
+                        func.parameters
+                            .iter()
+                            .zip(call.arguments.iter())
+                            .for_each(|(para, (arg, _))| {
+                                let arg_val = ctx.get_operand(&arg);
+                                new_ctx.virt_regs.insert(para.name.clone(), arg_val);
+                            });
+                        let ret = interpret_func(func, &mut new_ctx);
+                        if let Some(dest) = &call.dest {
+                            ctx.virt_regs.insert(dest.clone(), ret);
+                        }
+                    }
+                    _ => panic!("Unsupported function type"),
+                },
+                _ => panic!("Unsupported function type"),
+            }
         }
 
         _ => {

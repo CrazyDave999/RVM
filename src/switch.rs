@@ -1,12 +1,13 @@
 use crate::alloc::{alloc_stack, dealloc_stack};
-use crate::interpreter::{interpret_func};
+use crate::interpreter::{interpret_func, InterpreterContext};
 use crate::mem::{FUNC};
 
 #[unsafe(no_mangle)]
 pub extern "C" fn asm_call_fn_handler(fn_index: usize, ctx: *mut usize) {
     // todo
     let func = &FUNC.exclusive_access()[fn_index];
-    let ret = interpret_func(func);
+    let mut int_ctx = InterpreterContext::new();
+    let ret = interpret_func(func.clone(), &mut int_ctx);
     unsafe extern "C" {
         fn __interpreter_ret_asm(ret: i64, ctx: *mut usize);
     }

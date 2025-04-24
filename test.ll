@@ -1,17 +1,20 @@
+define i32 @square(i32 %x) {
+entry:
+  %1 = mul i32 %x, %x
+  ret i32 %1
+}
+
+define i32 @linear(i32 %a, i32 %x, i32 %b) {
+entry:
+  %1 = mul i32 %a, %x
+  %2 = add i32 %1, %b
+  ret i32 %2
+}
+
 
 define i32 @main() {
 entry:
-  %1 = alloca i32
-  %2 = add i32 1, 3
-  %icmp = icmp eq i32 %2, 3
-  br i1 %icmp, label %true, label %false
-true:
-  store i32 1, i32* %1
-  br label %exit
-false:
-  store i32 0, i32* %1
-  br label %exit
-exit:
-  %3 = load i32, ptr %1
-  ret i32 %3
+  %1 = call i32 @square(i32 5)
+  %2 = call i32 @linear(i32 2, i32 %1, i32 3)
+  ret i32 %2
 }
