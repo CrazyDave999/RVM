@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 pub struct InterpreterContext {
     pub virt_regs: HashMap<Name, i64>,
-    pub stack: Vec<usize>,
+    pub stack: Vec<i64>,
     pub last_bb: Name,
 }
 impl InterpreterContext {
@@ -37,6 +37,11 @@ impl InterpreterContext {
                 panic!("Unsupported operand type");
             }
         }
+    }
+    pub fn alloc(&mut self) -> i64 {
+        let addr = self.stack.len();
+        self.stack.push(0);
+        addr as i64
     }
 }
 
@@ -184,6 +189,21 @@ pub fn interpret_inst(inst: &Instruction, ctx: &mut InterpreterContext) {
             let rhs = ctx.get_operand(&ashr.operand1);
             let res = lhs >> rhs;
             ctx.virt_regs.insert(ashr.dest.clone(), res);
+        }
+        // Memory-related ops
+        Instruction::Alloca(alloca) => {
+            let addr = ctx.alloc();
+            ctx.virt_regs.insert(alloca.dest.clone(), addr);
+        }
+        Instruction::Load(load) => {
+            let addr = ctx.get_operand(&load.address);
+            let res = ctx.stack[addr as usize];
+            ctx.virt_regs.insert(load.dest.clone(), res);
+        }
+        Instruction::Store(store) => {
+            let addr = ctx.get_operand(&store.address);
+            let value = ctx.get_operand(&store.value);
+            ctx.stack[addr as usize] = value;
         }
 
         // LLVM's "other operations" category
