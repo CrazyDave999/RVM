@@ -298,6 +298,13 @@ pub fn interpret_extern_func(name: &str, paras: Vec<i64>) -> i64 {
             }
         }
         0
+    } else if name == "printInt" {
+        for para in paras.iter() {
+            unsafe {
+                print!("{}", *para);
+            }
+        }
+        0
     } else {
         panic!("Undefined function");
     }
