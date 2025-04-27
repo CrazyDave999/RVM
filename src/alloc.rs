@@ -5,7 +5,7 @@ use lazy_static::lazy_static;
 use libc::{MAP_ANONYMOUS, MAP_PRIVATE, PROT_READ, PROT_WRITE, mmap, munmap};
 pub const STACK_SIZE: usize = 1024 * 16;
 pub struct StackAllocator {
-    stack_ptrs: Vec<usize>,
+    stack_ptrs: Vec<u64>,
 }
 
 impl StackAllocator {
@@ -14,7 +14,7 @@ impl StackAllocator {
             stack_ptrs: Vec::new(),
         }
     }
-    pub fn alloc(&mut self) -> usize {
+    pub fn alloc(&mut self) -> u64 {
         unsafe {
             let addr = mmap(
                 ptr::null_mut(),
@@ -27,8 +27,8 @@ impl StackAllocator {
             if addr == libc::MAP_FAILED {
                 panic!("Failed to allocate stack");
             }
-            self.stack_ptrs.push(addr as usize);
-            addr as usize
+            self.stack_ptrs.push(addr as u64);
+            addr as u64
         }
     }
     pub fn dealloc(&mut self) {
@@ -46,7 +46,7 @@ lazy_static! {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn alloc_stack() -> usize {
+pub extern "C" fn alloc_stack() -> u64 {
     let mut inner = STACK_ALLOCATOR.exclusive_access();
     inner.alloc()
 }
@@ -55,4 +55,26 @@ pub extern "C" fn alloc_stack() -> usize {
 pub extern "C" fn dealloc_stack() {
     let mut inner = STACK_ALLOCATOR.exclusive_access();
     inner.dealloc();
+}
+
+pub fn alloc_mem(size: usize) -> u64 {
+    unsafe {
+        let addr = mmap(
+            ptr::null_mut(),
+            size,
+            PROT_READ | PROT_WRITE,
+            MAP_PRIVATE | MAP_ANONYMOUS,
+            -1,
+            0,
+        );
+        if addr == libc::MAP_FAILED {
+            panic!("Failed to allocate stack");
+        }
+        addr as u64
+    }
+}
+pub fn dealloc_mem(ptr: *mut u8, size: usize) {
+    unsafe {
+        munmap(ptr as *mut libc::c_void, size);
+    }
 }

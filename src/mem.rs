@@ -8,13 +8,13 @@ const FUNC_MAX_NUM: usize = 10000;
 
 /// table of function pointers
 #[unsafe(no_mangle)]
-static mut FUNC_TABLE: [usize; FUNC_MAX_NUM] = [0; FUNC_MAX_NUM];
+static mut FUNC_TABLE: [u64; FUNC_MAX_NUM] = [0; FUNC_MAX_NUM];
 
 lazy_static! {
     pub static ref FUNC: UPSafeCell<Vec<Arc<Function>>> = unsafe { UPSafeCell::new(Vec::new()) };
     pub static ref FUNC_NAME_RNK: UPSafeCell<HashMap<String, usize>> =
         unsafe { UPSafeCell::new(HashMap::new()) };
-    pub static ref GLOBAL_PTR: UPSafeCell<HashMap<String, Vec<i64>>> =
+    pub static ref GLOBAL_PTR: UPSafeCell<HashMap<String, u64>> =
         unsafe { UPSafeCell::new(HashMap::new()) };
 }
 

@@ -1,5 +1,5 @@
 use crate::mem::get_local_fn_by_name;
-use llvm_ir::{BasicBlock, Constant, Instruction, IntPredicate};
+use llvm_ir::{BasicBlock, Constant, Instruction, IntPredicate, Type};
 use llvm_ir::{Function, Name, Operand, Terminator};
 use std::collections::HashMap;
 use std::ffi::CStr;
@@ -27,8 +27,8 @@ impl InterpreterContext {
                 }
                 Constant::GlobalReference {name, ..} => {
                     let global_inner = crate::mem::GLOBAL_PTR.exclusive_access();
-                    if let Some(vec) = global_inner.get(&name.to_string()[1..]) {
-                        vec.as_ptr() as i64
+                    if let Some(ptr) = global_inner.get(&name.to_string()[1..]) {
+                        *ptr as i64
                     } else {
                         panic!("Global variable not found");
                     }
@@ -41,9 +41,11 @@ impl InterpreterContext {
             }
         }
     }
-    pub fn alloc(&mut self) -> i64 {
+    pub fn alloc(&mut self, size: usize) -> i64 {
         let addr = self.stack.len();
-        self.stack.push(0);
+        for _ in 0..size {
+            self.stack.push(0);
+        }
         addr as i64
     }
 }
@@ -191,7 +193,16 @@ pub fn interpret_inst(inst: &Instruction, ctx: &mut InterpreterContext) {
         }
         // Memory-related ops
         Instruction::Alloca(alloca) => {
-            let addr = ctx.alloc();
+            let size = match *alloca.allocated_type {
+                Type::IntegerType { .. } => {
+                    1
+                }
+                Type::ArrayType { num_elements, .. } => {
+                    num_elements
+                }
+                _ => panic!("Unsupported alloca type"),
+            };
+            let addr = ctx.alloc(size);
             ctx.virt_regs.insert(alloca.dest.clone(), addr);
         }
         Instruction::Load(load) => {
@@ -203,6 +214,19 @@ pub fn interpret_inst(inst: &Instruction, ctx: &mut InterpreterContext) {
             let addr = ctx.get_operand(&store.address);
             let value = ctx.get_operand(&store.value);
             ctx.stack[addr as usize] = value;
+        }
+        Instruction::GetElementPtr(get_elem_ptr) => {
+            // only 1 dimension GEP is supported
+            let addr = ctx.get_operand(&get_elem_ptr.address);
+            let indices = get_elem_ptr
+                .indices
+                .iter()
+                .map(|op| ctx.get_operand(op))
+                .collect::<Vec<i64>>();
+            if indices.len() != 2 {
+                panic!("Unsupported GEP indices");
+            }
+            ctx.virt_regs.insert(get_elem_ptr.dest.clone(), addr + indices[1]);
         }
 
         // LLVM's "other operations" category

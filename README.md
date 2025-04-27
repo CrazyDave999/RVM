@@ -37,6 +37,10 @@ We use a table to indicate which BB has been compiled. RVM is responsible for ma
  The last branch instruction should be modified to a small code fragment. Check the table to determine whether 
  jump directly to the target BB or return to RVM control flow.
  
+## Environment
+```shell
+sudo apt install llvm-18 libpolly-18-dev zlib1g-dev libzstd-dev
+```
 
 ## QEMU start command
 
