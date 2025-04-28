@@ -27,7 +27,7 @@ impl InterpreterContext {
                 }
                 Constant::GlobalReference {name, ..} => {
                     let global_inner = crate::mem::GLOBAL_PTR.exclusive_access();
-                    if let Some(ptr) = global_inner.get(&name.to_string()[1..]) {
+                    if let Some(ptr) = global_inner.get(name) {
                         *ptr as i64
                     } else {
                         panic!("Global variable not found");

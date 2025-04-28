@@ -1,6 +1,6 @@
 use super::up::UPSafeCell;
 use lazy_static::lazy_static;
-use llvm_ir::Function;
+use llvm_ir::{Function, Name};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -14,7 +14,7 @@ lazy_static! {
     pub static ref FUNC: UPSafeCell<Vec<Arc<Function>>> = unsafe { UPSafeCell::new(Vec::new()) };
     pub static ref FUNC_NAME_RNK: UPSafeCell<HashMap<String, usize>> =
         unsafe { UPSafeCell::new(HashMap::new()) };
-    pub static ref GLOBAL_PTR: UPSafeCell<HashMap<String, u64>> =
+    pub static ref GLOBAL_PTR: UPSafeCell<HashMap<Name, u64>> =
         unsafe { UPSafeCell::new(HashMap::new()) };
 }
 

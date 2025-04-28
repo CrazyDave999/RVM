@@ -61,8 +61,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // init global vars
     let mut global_inner = mem::GLOBAL_PTR.exclusive_access();
     for var in module.global_vars.iter() {
-        let name = &var.name.to_string()[1..];
-        global_inner.insert(name.to_string(), global_var_ptr);
+        global_inner.insert(var.name.clone(), global_var_ptr);
         match *var.ty {
             Type::IntegerType { .. } => {
                 let init_val = if let Some(val) = &var.initializer {
