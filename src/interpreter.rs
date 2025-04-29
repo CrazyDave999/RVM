@@ -2,9 +2,7 @@ use crate::mem::get_local_fn_by_name;
 use llvm_ir::{BasicBlock, Constant, Instruction, IntPredicate, Type};
 use llvm_ir::{Function, Name, Operand, Terminator};
 use std::collections::HashMap;
-use std::ffi::CStr;
 use std::sync::Arc;
-use libc::c_char;
 
 pub struct InterpreterContext {
     pub virt_regs: HashMap<Name, i64>,
@@ -308,7 +306,7 @@ pub fn interpret_inst(inst: &Instruction, ctx: &mut InterpreterContext) {
 }
 
 pub fn interpret_extern_func(name: &str, paras: Vec<i64>) -> i64 {
-    if name == "print" {
+    if name == "..print" {
         for para in paras.iter() {
             unsafe {
                 let mut p = (*para) as *const i64;
@@ -322,7 +320,7 @@ pub fn interpret_extern_func(name: &str, paras: Vec<i64>) -> i64 {
             }
         }
         0
-    } else if name == "printInt" {
+    } else if name == "..printInt" {
         for para in paras.iter() {
             unsafe {
                 print!("{}", *para);

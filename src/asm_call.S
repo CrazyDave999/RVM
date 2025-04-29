@@ -15,6 +15,7 @@
 	.global __interpreter_ret_asm
 	.align 2
 # from asm to interpreter/asm
+# fn __asm_call_fn() -> i64;
 __asm_call_fn:
 	# now t0 is the func index, ra is next pc of the call inst
 

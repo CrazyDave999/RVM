@@ -14,7 +14,6 @@ entry:
     ret i32 %2
 }
 
-
 define i32 @main() {
 entry:
     %x = alloca [10 x i32], align 4
@@ -53,5 +52,17 @@ entry:
     ret i32 66
 }
 
-declare signext i32 @print(ptr noundef, ...)
-declare signext i32 @printInt(i32)
+define i32 @print(ptr noundef %str) {
+entry:
+    %v0 = call i32 @..print(ptr noundef %str)
+    ret i32 %v0
+}
+
+define i32 @printInt(i32 %x) {
+entry:
+    %v0 = call i32 @..printInt(i32 %x)
+    ret i32 %v0
+}
+
+declare signext i32 @..print(ptr noundef)
+declare signext i32 @..printInt(i32)

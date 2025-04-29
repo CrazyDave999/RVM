@@ -4,7 +4,7 @@ use llvm_ir::{Function, Name};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-const FUNC_MAX_NUM: usize = 10000;
+pub const FUNC_MAX_NUM: usize = 10000;
 
 /// table of function pointers
 #[unsafe(no_mangle)]

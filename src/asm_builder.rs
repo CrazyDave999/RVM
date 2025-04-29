@@ -1,11 +1,17 @@
 use crate::alloc::alloc_mem;
 use crate::interpreter::sign_extend;
-use crate::mem::GLOBAL_PTR;
-use llvm_ir::{Constant, Function, Instruction, Name, Operand, Terminator, Type};
+use crate::mem::{FUNC, FUNC_NAME_RNK, GLOBAL_PTR};
+use llvm_ir::{Constant, Function, Instruction, IntPredicate, Name, Operand, Terminator, Type};
+use std::arch::global_asm;
 use std::cell::RefCell;
 use std::cmp::{max, min};
 use std::collections::HashMap;
 use std::sync::Arc;
+
+global_asm!(include_str!("asm_call.S"));
+unsafe extern "C" {
+    fn __asm_call_fn() -> i64;
+}
 
 static PHY_REGS: [&'static str; 32] = [
     "zero", "ra", "sp", "gp", "tp", "t0", "t1", "t2", "s0", "s1", "a0", "a1", "a2", "a3", "a4",
@@ -160,36 +166,144 @@ impl ASMInst {
                 // do nothing
             }
             Instruction::Store(store) => {
-                res.extend(Self::get_operand("t0", &store.value, ctx, false));
-                match &store.address {
-                    Operand::LocalOperand { name, .. } => {
-                        let addr = *ctx.local_ptrs.get(&name).unwrap();
-                        res.extend(Self::sd("t0", "sp", addr as i64));
-                    }
-                    Operand::ConstantOperand(c) => match &**c {
-                        Constant::GlobalReference { name, .. } => {
-                            let global_inner = GLOBAL_PTR.exclusive_access();
-                            let addr = *global_inner.get(name).unwrap();
-                            res.extend(Self::addi("t1", "x0", addr as i64));
-                            res.extend(Self::sd("t0", "t1", 0));
-                        }
-                        _ => panic!("Unsupported constant store"),
-                    },
-                    _ => panic!("Unsupported operand for store"),
-                };
+                res.extend(Self::get_operand("t0", &store.value, ctx));
+                res.extend(Self::get_operand("t1", &store.address, ctx));
+                res.extend(Self::s_type("sd", "t0", "t1", 0));
             }
-            Instruction::GetElementPtr(_) => {}
+            Instruction::GetElementPtr(get_elem_ptr) => {
+                let dest = &get_elem_ptr.dest;
+                let addr = &get_elem_ptr.address;
+                let idx = &get_elem_ptr.indices[1];
+                res.extend(Self::get_operand("t0", &addr, ctx));
+                res.extend(Self::get_operand("t1", &idx, ctx));
+                res.extend(Self::i_type("slli", "t1", "t1", 3));
+                res.extend(Self::r_type("add", "t2", "t0", "t1"));
+                res.extend(Self::s_type(
+                    "sd",
+                    "t2",
+                    "sp",
+                    *ctx.local_vars.get(dest).unwrap() as i64,
+                ));
+            }
 
-            Instruction::ICmp(_) => {}
+            Instruction::ICmp(icmp) => {
+                let lhs = &icmp.operand0;
+                let rhs = &icmp.operand1;
+                let dest = &icmp.dest;
+                res.extend(Self::get_operand("t0", &lhs, ctx));
+                res.extend(Self::get_operand("t1", &rhs, ctx));
 
-            Instruction::Call(_) => {}
+                match icmp.predicate {
+                    IntPredicate::EQ => {
+                        res.extend(Self::r_type("xor", "t2", "t0", "t1"));
+                        res.extend(Self::i_type("sltiu", "t3", "t2", 1));
+                    }
+                    IntPredicate::NE => {
+                        res.extend(Self::r_type("xor", "t2", "t0", "t1"));
+                        res.extend(Self::r_type("sltu", "t3", "x0", "t2"));
+                    }
+                    IntPredicate::UGT => {
+                        res.extend(Self::r_type("sltu", "t3", "t1", "t0"));
+                    }
+                    IntPredicate::UGE => {
+                        res.extend(Self::r_type("sltu", "t2", "t0", "t1"));
+                        res.extend(Self::i_type("xori", "t3", "t2", 1));
+                    }
+                    IntPredicate::ULT => res.extend(Self::r_type("sltu", "t3", "t0", "t1")),
+                    IntPredicate::ULE => {
+                        res.extend(Self::r_type("sltu", "t2", "t1", "t0"));
+                        res.extend(Self::i_type("xori", "t3", "t2", 1));
+                    }
+                    IntPredicate::SGT => {
+                        res.extend(Self::r_type("slt", "t3", "t1", "t0"));
+                    }
+                    IntPredicate::SGE => {
+                        res.extend(Self::r_type("slt", "t2", "t0", "t1"));
+                        res.extend(Self::i_type("xori", "t3", "t2", 1));
+                    }
+                    IntPredicate::SLT => {
+                        res.extend(Self::r_type("slt", "t3", "t0", "t1"));
+                    }
+                    IntPredicate::SLE => {
+                        res.extend(Self::r_type("slt", "t2", "t1", "t0"));
+                        res.extend(Self::i_type("xori", "t3", "t2", 1));
+                    }
+                }
+                res.extend(Self::s_type(
+                    "sd",
+                    "t3",
+                    "sp",
+                    *ctx.local_vars.get(dest).unwrap() as i64,
+                ));
+            }
+
+            Instruction::Call(call) => match &call.function.clone().right().unwrap() {
+                Operand::ConstantOperand(const_ref) => match &**const_ref {
+                    Constant::GlobalReference { name, .. } => {
+                        let fn_rnk_inner = FUNC_NAME_RNK.exclusive_access();
+                        let fn_index = *fn_rnk_inner.get(&name.to_string()[1..]).unwrap();
+                        let func_inner = FUNC.exclusive_access();
+                        let func = func_inner.get(fn_index).unwrap().clone();
+                        drop(fn_rnk_inner);
+                        drop(func_inner);
+
+                        // prepare args
+                        for (i, (arg, _)) in call.arguments.iter().enumerate() {
+                            if i < 8 {
+                                res.extend(Self::get_operand(PHY_REGS[i + 10], arg, ctx));
+                            } else {
+                                res.extend(Self::get_operand("t0", arg, ctx));
+                                res.extend(Self::s_type("sd", "t0", "sp", (8 * (i - 8)) as i64));
+                            }
+                        }
+
+                        // t0 should be the func index
+                        res.extend(Self::li("t0", fn_index as i64));
+
+                        // call the asm func: __asm_call_fn
+                        // todo
+
+                        // store the return value
+                        if let Some(dest) = &call.dest {
+                            res.extend(Self::s_type(
+                                "sd",
+                                "a0",
+                                "sp",
+                                *ctx.local_vars.get(dest).unwrap() as i64,
+                            ))
+                        }
+
+                        // restore para, since they are caller-saved
+                        for (name, reg) in ctx.paras.iter() {
+                            res.extend(Self::i_type(
+                                "ld",
+                                reg.0,
+                                "sp",
+                                *ctx.local_vars.get(name).unwrap() as i64,
+                            ))
+                        }
+                    }
+                    _ => panic!("Unsupported function call"),
+                },
+                _ => panic!("Unsupported function call"),
+            },
             _ => panic!("Unsupported instruction: {:?}", ir_inst),
         }
         res
     }
     pub fn from_terminator(term: &Terminator, ctx: &ASMContext) -> Vec<Self> {
-        let res = Vec::new();
-
+        let mut res = Vec::new();
+        match term {
+            Terminator::Ret(ret) => {
+                if let Some(op) = &ret.return_operand {
+                    res.extend(Self::get_operand("a0", op, ctx));
+                    res.extend(Self::i_type("jalr", "x0", "ra", 0));
+                }
+            }
+            Terminator::Br(_) => {}
+            Terminator::CondBr(_) => {}
+            _ => panic!("Unsupported terminator: {:?}", term),
+        }
         res
     }
     fn to_binary(&self) -> u32 {
@@ -283,7 +397,7 @@ impl ASMInst {
     fn get_shifted_imm(&self) -> u32 {
         match self.ty {
             InstType::I | InstType::L => (self.imm & ((1u32 << 12) - 1)) << 20,
-            InstType::IStar => (self.imm & ((1u32 << 5) - 1)) << 20,
+            InstType::IStar => (self.imm & ((1u32 << 6) - 1)) << 20,
             InstType::S => {
                 let imm = self.imm & ((1u32 << 12) - 1);
                 ((imm & 0b1_1111) << 7) | ((imm >> 5) << 25)
@@ -306,6 +420,8 @@ impl ASMInst {
             _ => 0,
         }
     }
+
+    /// will use t5, t6
     pub fn addi(rd: &'static str, rs1: &'static str, imm: i64) -> Vec<Self> {
         let mut res = Vec::new();
         if imm >= -2048 && imm <= 2047 {
@@ -319,34 +435,125 @@ impl ASMInst {
                 label: None,
             });
         } else {
-            todo!()
+            res.extend(Self::li("t5", imm));
+            res.extend(Self::r_type("add", rd, rs1, "t5"));
         }
         res
     }
 
-    pub fn ld(rd: &'static str, rs1: &'static str, imm: i64) -> Vec<Self> {
+    /// implement li pseudo inst manually \
+    /// will use t6
+    pub fn li(rd: &'static str, imm: i64) -> Vec<Self> {
         let mut res = Vec::new();
         if imm >= -2048 && imm <= 2047 {
             res.push(Self {
-                name: "ld",
+                name: "addi",
+                rs1: PhyReg("x0"),
+                rs2: PhyReg("x0"),
+                rd: PhyReg(rd),
+                ty: InstType::I,
+                imm: imm as u32,
+                label: None,
+            });
+        } else if imm >= -2147483648 && imm <= 2147483647 {
+            res.push(Self {
+                name: "lui",
+                rs1: PhyReg("x0"),
+                rs2: PhyReg("x0"),
+                rd: PhyReg(rd),
+                ty: InstType::U,
+                imm: imm as u32,
+                label: None,
+            });
+            res.extend(Self::addi(rd, rd, imm & 0xFFF));
+        } else {
+            let (high, low) = (((imm as u64) >> 32) as i64, imm & 0xFFFF_FFFF);
+            res.extend(Self::li(rd, high));
+            res.extend(Self::i_type("slli", rd, rd, 32));
+            res.extend(Self::li("t6", low));
+            res.extend(Self::r_type("add", rd, rd, "t6"));
+        }
+        res
+    }
+
+    pub fn r_type(
+        inst_name: &'static str,
+        rd: &'static str,
+        rs1: &'static str,
+        rs2: &'static str,
+    ) -> Vec<Self> {
+        let mut res = Vec::new();
+        res.push(Self {
+            name: inst_name,
+            rs1: PhyReg(rs1),
+            rs2: PhyReg(rs2),
+            rd: PhyReg(rd),
+            ty: InstType::R,
+            imm: 0,
+            label: None,
+        });
+        res
+    }
+    pub fn i_type(
+        inst_name: &'static str,
+        rd: &'static str,
+        rs1: &'static str,
+        imm: i64,
+    ) -> Vec<Self> {
+        let i_r_map = HashMap::from([
+            ("addi", "add"),
+            ("andi", "and"),
+            ("ori", "or"),
+            ("xori", "xor"),
+            ("slli", "sll"),
+            ("srli", "srl"),
+            ("srai", "sra"),
+            ("slti", "slt"),
+            ("sltiu", "sltu"),
+        ]);
+        let mut res = Vec::new();
+        if imm >= -2048 && imm <= 2047 {
+            res.push(Self {
+                name: inst_name,
                 rs1: PhyReg(rs1),
                 rs2: PhyReg("x0"),
                 rd: PhyReg(rd),
-                ty: InstType::L,
+                ty: match inst_name {
+                    "slli" | "srli" | "srai" => {
+                        assert!(imm >= 0 && imm <= 63);
+                        InstType::IStar
+                    }
+                    "ld" => InstType::L,
+                    _ => InstType::I,
+                },
                 imm: imm as u32,
                 label: None,
             });
         } else {
-            todo!()
+            match inst_name {
+                "jalr" | "ld" => {
+                    res.extend(Self::addi("t4", rs1, imm));
+                    res.extend(Self::i_type(inst_name, rd, "t4", 0));
+                }
+                _ => {
+                    res.extend(Self::li("t5", imm));
+                    res.extend(Self::r_type(i_r_map[inst_name], rd, rs1, "t5"));
+                }
+            }
         }
         res
     }
 
-    pub fn sd(rs1: &'static str, rs2: &'static str, imm: i64) -> Vec<Self> {
+    pub fn s_type(
+        inst_name: &'static str,
+        rs1: &'static str,
+        rs2: &'static str,
+        imm: i64,
+    ) -> Vec<Self> {
         let mut res = Vec::new();
         if imm >= -2048 && imm <= 2047 {
             res.push(Self {
-                name: "sd",
+                name: inst_name,
                 rs1: PhyReg(rs1),
                 rs2: PhyReg(rs2),
                 rd: PhyReg("x0"),
@@ -355,8 +562,24 @@ impl ASMInst {
                 label: None,
             });
         } else {
-            todo!()
+            res.extend(Self::addi("t4", rs2, imm));
+            res.extend(Self::s_type(inst_name, rs1, "t4", 0));
         }
+        res
+    }
+
+    pub fn j_type(inst_name: &'static str, rd: &'static str, imm: i64) -> Vec<Self> {
+        let mut res = Vec::new();
+        assert!(imm >= -1048576 && imm <= 1048575);
+        res.push(Self {
+            name: inst_name,
+            rs1: PhyReg("x0"),
+            rs2: PhyReg("x0"),
+            rd: PhyReg(rd),
+            ty: InstType::J,
+            imm: imm as u32,
+            label: None,
+        });
         res
     }
 
@@ -368,8 +591,8 @@ impl ASMInst {
         ctx: &ASMContext,
     ) -> Vec<Self> {
         let mut res = Vec::new();
-        res.extend(Self::get_operand("t0", op0, ctx, false));
-        res.extend(Self::get_operand("t1", op1, ctx, false));
+        res.extend(Self::get_operand("t0", op0, ctx));
+        res.extend(Self::get_operand("t1", op1, ctx));
         res.push(Self {
             name: inst_name,
             rs1: PhyReg("t0"),
@@ -379,7 +602,8 @@ impl ASMInst {
             imm: 0,
             label: None,
         });
-        res.extend(Self::sd(
+        res.extend(Self::s_type(
+            "sd",
             "t2",
             "sp",
             *ctx.local_vars.get(dest).unwrap() as i64,
@@ -387,38 +611,33 @@ impl ASMInst {
         res
     }
 
-    /// load a local var to rd, or load a global ptr to rd. \
-    /// local ptrs should never be loaded to phy reg \
+    /// load a local var to rd, or load a global/local ptr to rd. \
     /// if not force, we can consider if op is a para and if we can just pass
-    pub fn get_operand(rd: &'static str, op: &Operand, ctx: &ASMContext, force: bool) -> Vec<Self> {
+    pub fn get_operand(rd: &'static str, op: &Operand, ctx: &ASMContext) -> Vec<Self> {
         match op {
             Operand::ConstantOperand(const_ref) => {
                 match &**const_ref {
                     Constant::Int { bits, value } => {
                         let imm = sign_extend(*bits, *value);
-                        Self::addi(rd, "x0", imm)
+                        Self::li(rd, imm)
                     }
                     Constant::GlobalReference { name, .. } => {
                         // get the value of global ptr
                         let global_inner = GLOBAL_PTR.exclusive_access();
                         let imm = global_inner.get(name).unwrap();
-                        Self::addi(rd, "x0", *imm as i64)
+                        Self::li(rd, *imm as i64)
                     }
                     _ => panic!("Unsupported constant operand"),
                 }
             }
             Operand::LocalOperand { name, .. } => {
-                if let Some(reg) = ctx.paras.get(name) {
-                    if !force && reg.0 == rd {
-                        return vec![];
-                    }
-                }
-
                 if let Some(offset) = ctx.local_vars.get(name) {
-                    Self::ld(rd, "sp", *offset as i64)
+                    Self::i_type("ld", rd, "sp", *offset as i64)
                 } else if let Some(ptr) = ctx.local_ptr_map.get(name) {
                     let offset = ctx.local_ptrs.get(ptr).unwrap();
-                    Self::ld(rd, "sp", *offset as i64)
+                    Self::i_type("ld", rd, "sp", *offset as i64)
+                } else if let Some(offset) = ctx.local_ptrs.get(name) {
+                    Self::addi(rd, "sp", *offset as i64)
                 } else {
                     panic!("Local var not found! var: {:?}", name);
                 }
@@ -621,35 +840,33 @@ impl ASMBuilder {
             asm: RefCell::new(Vec::new()),
         }
     }
-    pub fn addi(&self, rd: &'static str, rs: &'static str, imm: i64) {
-        self.asm.borrow_mut().extend(ASMInst::addi(rd, rs, imm));
-    }
 
     /// after call, retrieve the para from stack again
     pub fn restore_para(&self) {}
 
-    fn build_inst(&self, ir_inst: &Instruction) {
-        self.asm
-            .borrow_mut()
-            .extend(ASMInst::from_inst(ir_inst, &self.ctx));
-    }
-    fn build_terminator(&self, term: &Terminator) {
-        self.asm
-            .borrow_mut()
-            .extend(ASMInst::from_terminator(term, &self.ctx));
-    }
     pub fn build(&mut self) {
+        let mut inner = self.asm.borrow_mut();
         // prepare stack
-        self.addi("sp", "sp", -(self.ctx.stack_size as i64));
+        inner.extend(ASMInst::addi("sp", "sp", -(self.ctx.stack_size as i64)));
+
+        // store paras
+        for (name, reg) in self.ctx.paras.iter() {
+            inner.extend(ASMInst::s_type(
+                "sd",
+                reg.0,
+                "sp",
+                *self.ctx.local_vars.get(name).unwrap() as i64,
+            ));
+        }
 
         for bb in self.func.basic_blocks.iter() {
             for inst in bb.instrs.iter() {
-                self.build_inst(inst);
+                inner.extend(ASMInst::from_inst(inst, &self.ctx));
             }
-            self.build_terminator(&bb.term);
+            inner.extend(ASMInst::from_terminator(&bb.term, &self.ctx));
         }
 
-        self.addi("sp", "sp", self.ctx.stack_size as i64);
+        inner.extend(ASMInst::addi("sp", "sp", self.ctx.stack_size as i64));
     }
 
     pub fn to_binary(&self) -> Vec<u32> {
