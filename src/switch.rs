@@ -10,7 +10,7 @@ pub extern "C" fn asm_call_fn_handler(fn_index: u64, ctx: *mut u64) {
     let func = get_local_fn_by_rnk(fn_index as usize);
     let mut int_ctx = InterpreterContext::new();
     let ret = interpret_func(func, &mut int_ctx);
-    
+
     unsafe extern "C" {
         fn __interpreter_ret_asm(ret: i64, ctx: *mut u64);
     }

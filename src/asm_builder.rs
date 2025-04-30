@@ -260,7 +260,7 @@ impl ASMInst {
                         res.extend(Self::li("t0", fn_index as i64));
 
                         // call the asm func: __asm_call_fn
-                        res.extend(Self::li("t1", __asm_call_fn as i64));
+                        // res.extend(Self::li("t1", __asm_call_fn as i64));
                         res.extend(Self::i_type("jalr", "ra", "t1", 0));
 
                         // store the return value
@@ -297,6 +297,7 @@ impl ASMInst {
             Terminator::Ret(ret) => {
                 if let Some(op) = &ret.return_operand {
                     res.extend(Self::get_operand("a0", op, ctx));
+                    res.extend(Self::i_type("addi", "sp", "sp", ctx.stack_size as i64));
                     res.extend(Self::i_type("jalr", "x0", "ra", 0));
                 }
             }
@@ -354,9 +355,58 @@ impl ASMInst {
             InstType::J => opcode | (rd << 7) | shifted_imm,
         }
     }
-    // fn to_string(&self) -> String {
-    //     String::new()
-    // }
+    fn to_string(&self) -> String {
+        match self.ty {
+            InstType::R => {
+                format!(
+                    "{} {}, {}, {}\n",
+                    self.name, self.rd.0, self.rs1.0, self.rs2.0
+                )
+            }
+            InstType::I => {
+                format!(
+                    "{} {}, {}, {}\n",
+                    self.name, self.rd.0, self.rs1.0, self.imm as i32
+                )
+            }
+            InstType::IStar => {
+                format!(
+                    "{} {}, {}, {}\n",
+                    self.name, self.rd.0, self.rs1.0, self.imm as i32
+                )
+            }
+            InstType::L => {
+                format!(
+                    "{} {}, {}({})\n", 
+                    self.name, self.rd.0, self.imm, self.rs1.0
+                )
+            }
+            InstType::S => {
+                format!(
+                    "{} {}, {}({})\n",
+                    self.name, self.rs2.0, self.imm, self.rs1.0
+                )
+            }
+            InstType::B => {
+                format!(
+                    "{} {}, {}, {}\n",
+                    self.name, self.rs1.0, self.rs2.0, self.imm as i32
+                )
+            }
+            InstType::U => {
+                format!(
+                    "{} {}, {}\n",
+                    self.name, self.rd.0, self.imm
+                )
+            }
+            InstType::J => {
+                format!(
+                    "{} {}, {}\n",
+                    self.name, self.rd.0, self.imm as i32
+                )
+            }
+        }
+    }
     fn get_funct(&self) -> (u32, u32) {
         match self.name {
             "add" => (0b000, 0b000_0000),
@@ -546,8 +596,8 @@ impl ASMInst {
 
     pub fn s_type(
         inst_name: &'static str,
-        rs1: &'static str,
         rs2: &'static str,
+        rs1: &'static str,
         imm: i64,
     ) -> Vec<Self> {
         let mut res = Vec::new();
@@ -561,8 +611,8 @@ impl ASMInst {
                 imm: imm as u32,
             });
         } else {
-            res.extend(Self::addi("t4", rs2, imm));
-            res.extend(Self::s_type(inst_name, rs1, "t4", 0));
+            res.extend(Self::addi("t4", rs1, imm));
+            res.extend(Self::s_type(inst_name, rs2, "t4", 0));
         }
         res
     }
@@ -907,8 +957,6 @@ impl ASMBuilder {
             inner.extend(ASMInst::from_terminator(&bb.term, &self.ctx));
         }
 
-        inner.extend(ASMInst::addi("sp", "sp", self.ctx.stack_size as i64));
-
         // correct the placeholders
         for (i, inst) in inner.iter_mut().enumerate() {
             match inst.name {
@@ -920,6 +968,14 @@ impl ASMBuilder {
                 _ => {}
             }
         }
+    }
+    pub fn print(&self) {
+        println!("assembly of func: {}", self.func.name);
+        let inner = self.asm.borrow();
+        for inst in inner.iter() {
+            print!("{}", inst.to_string());
+        }
+        println!()
     }
 
     pub fn to_binary(&self) -> Vec<u32> {
@@ -937,6 +993,8 @@ pub fn compile_func(func: Arc<Function>) -> u64 {
     let mut asm_builder = ASMBuilder::from(func.clone());
 
     asm_builder.build();
+    asm_builder.print();
+    // panic!();
 
     let binary = asm_builder.to_binary();
     let start_ptr = alloc_mem(binary.len() * 4); // will not dealloc this, until the program ends
