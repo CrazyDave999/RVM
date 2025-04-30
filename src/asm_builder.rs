@@ -917,7 +917,7 @@ impl ASMBuilder {
                     let offset = label_offset - i as u64 * 4;
                     inst.imm = offset as u32;
                 }
-                _ => panic!("Unsupported asm instruction: {}", inst.name),
+                _ => {}
             }
         }
     }
