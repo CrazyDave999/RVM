@@ -59,7 +59,7 @@ impl PhyReg {
                 "t4" => 29,
                 "t5" => 30,
                 "t6" => 31,
-                _ => panic!("Unsupported register name"),
+                _ => panic!("Unsupported register name, {}", self.0),
             }
         }
     }
@@ -399,7 +399,7 @@ impl ASMInst {
             "auipc" => (0b000, 0b000_0000),
             "lui" => (0b000, 0b000_0000),
 
-            _ => panic!("Unsupported instruction"),
+            _ => panic!("Unsupported instruction, {}", self.name),
         }
     }
 
@@ -415,7 +415,7 @@ impl ASMInst {
                 InstType::L => 0b000_0011,
                 InstType::S => 0b010_0011,
                 InstType::B => 0b110_0011,
-                _ => panic!("Unsupported instruction"),
+                _ => panic!("Unsupported instruction, {}", self.name),
             },
         }
     }
@@ -917,7 +917,7 @@ impl ASMBuilder {
                     let offset = label_offset - i as u64 * 4;
                     inst.imm = offset as u32;
                 }
-                _ => panic!("Unsupported asm instruction"),
+                _ => panic!("Unsupported asm instruction: {}", inst.name),
             }
         }
     }
