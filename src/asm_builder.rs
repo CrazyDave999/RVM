@@ -1,6 +1,6 @@
 use crate::alloc::alloc_mem;
 use crate::interpreter::sign_extend;
-use crate::mem::{FUNC_NAME_RNK, GLOBAL_PTR};
+use crate::mem::{GLOBAL_PTR, get_local_rnk};
 use llvm_ir::{Constant, Function, Instruction, IntPredicate, Name, Operand, Terminator, Type};
 use std::arch::global_asm;
 use std::cell::RefCell;
@@ -244,9 +244,7 @@ impl ASMInst {
             Instruction::Call(call) => match &call.function.clone().right().unwrap() {
                 Operand::ConstantOperand(const_ref) => match &**const_ref {
                     Constant::GlobalReference { name, .. } => {
-                        let fn_rnk_inner = FUNC_NAME_RNK.exclusive_access();
-                        let fn_index = *fn_rnk_inner.get(&name.to_string()[1..]).unwrap();
-                        drop(fn_rnk_inner);
+                        let fn_index = get_local_rnk(&name.to_string()[1..]).unwrap();
 
                         // prepare args
                         for (i, (arg, _)) in call.arguments.iter().enumerate() {
@@ -356,9 +354,9 @@ impl ASMInst {
             InstType::J => opcode | (rd << 7) | shifted_imm,
         }
     }
-    fn to_string(&self) -> String {
-        String::new()
-    }
+    // fn to_string(&self) -> String {
+    //     String::new()
+    // }
     fn get_funct(&self) -> (u32, u32) {
         match self.name {
             "add" => (0b000, 0b000_0000),
@@ -751,6 +749,7 @@ impl ASMContext {
         }
 
         ctx.stack_size += max(max_call_para_num, 8) - 8; // for spill
+        ctx.stack_size += 8;
         ctx.stack_size = (ctx.stack_size + 15) / 16 * 16; // align to 16
 
         // now get all offset
@@ -940,12 +939,12 @@ pub fn compile_func(func: Arc<Function>) -> u64 {
     asm_builder.build();
 
     let binary = asm_builder.to_binary();
-    let start_ptr = alloc_mem(binary.len() * 4);
-    
+    let start_ptr = alloc_mem(binary.len() * 4); // will not dealloc this, until the program ends
+
     unsafe {
         ptr::copy_nonoverlapping(binary.as_ptr(), start_ptr as *mut u32, binary.len());
     }
-    
+
     // let mut ptr = start_ptr;
     // for inst in binary.iter() {
     //     unsafe {
@@ -953,6 +952,6 @@ pub fn compile_func(func: Arc<Function>) -> u64 {
     //     }
     //     ptr += 4;
     // }
- 
+
     start_ptr
 }

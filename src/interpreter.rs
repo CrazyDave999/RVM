@@ -1,4 +1,6 @@
-use crate::mem::get_local_fn_by_name;
+use crate::asm_builder::compile_func;
+use crate::mem::{FUNC_TABLE, HOTNESS, get_local_fn_by_rnk, get_local_rnk};
+use crate::switch::interpreter_call_asm;
 use llvm_ir::{BasicBlock, Constant, Instruction, IntPredicate, Type};
 use llvm_ir::{Function, Name, Operand, Terminator};
 use std::collections::HashMap;
@@ -20,10 +22,8 @@ impl InterpreterContext {
     pub fn get_operand(&self, op: &Operand) -> i64 {
         match op {
             Operand::ConstantOperand(c) => match &**c {
-                Constant::Int { bits, value } => {
-                    sign_extend(*bits, *value)
-                }
-                Constant::GlobalReference {name, ..} => {
+                Constant::Int { bits, value } => sign_extend(*bits, *value),
+                Constant::GlobalReference { name, .. } => {
                     let global_inner = crate::mem::GLOBAL_PTR.exclusive_access();
                     if let Some(ptr) = global_inner.get(name) {
                         *ptr as i64
@@ -192,12 +192,8 @@ pub fn interpret_inst(inst: &Instruction, ctx: &mut InterpreterContext) {
         // Memory-related ops
         Instruction::Alloca(alloca) => {
             let size = match *alloca.allocated_type {
-                Type::IntegerType { .. } => {
-                    1
-                }
-                Type::ArrayType { num_elements, .. } => {
-                    num_elements
-                }
+                Type::IntegerType { .. } => 1,
+                Type::ArrayType { num_elements, .. } => num_elements,
                 _ => panic!("Unsupported alloca type"),
             };
             let addr = ctx.alloc(size);
@@ -224,7 +220,8 @@ pub fn interpret_inst(inst: &Instruction, ctx: &mut InterpreterContext) {
             if indices.len() != 2 {
                 panic!("Unsupported GEP indices");
             }
-            ctx.virt_regs.insert(get_elem_ptr.dest.clone(), addr + indices[1]);
+            ctx.virt_regs
+                .insert(get_elem_ptr.dest.clone(), addr + indices[1]);
         }
 
         // LLVM's "other operations" category
@@ -268,29 +265,61 @@ pub fn interpret_inst(inst: &Instruction, ctx: &mut InterpreterContext) {
             match call.function.clone().right().unwrap() {
                 Operand::ConstantOperand(const_ref) => match &*const_ref {
                     Constant::GlobalReference { name, .. } => {
-                        if let Some(func) = get_local_fn_by_name(&name.to_string()[1..]) {
-                            let mut new_ctx = InterpreterContext::new();
-                            func.parameters
-                                .iter()
-                                .zip(call.arguments.iter())
-                                .for_each(|(para, (arg, _))| {
-                                    let arg_val = ctx.get_operand(&arg);
-                                    new_ctx.virt_regs.insert(para.name.clone(), arg_val);
-                                });
-                            let ret = interpret_func(func, &mut new_ctx);
-                            if let Some(dest) = &call.dest {
-                                ctx.virt_regs.insert(dest.clone(), ret);
+                        let name = &name.to_string()[1..];
+                        let args = call
+                            .arguments
+                            .iter()
+                            .map(|(op, _)| ctx.get_operand(op))
+                            .collect::<Vec<i64>>();
+                        let mut ret = 0;
+                        if let Some(rnk) = get_local_rnk(name) {
+                            // this name is some function like define i32 @func
+                            let addr = unsafe { FUNC_TABLE[rnk] };
+                            if addr != 0 {
+                                // this function has been compiled
+                                ret = interpreter_call_asm(
+                                    addr,
+                                    args.len() as u64,
+                                    args.as_ptr() as u64,
+                                );
+                            } else {
+                                // local function
+                                let mut hotness = HOTNESS.exclusive_access();
+                                if hotness[&(rnk as u64)] >= 0 {
+                                    // compile, then call its asm
+                                    let addr = compile_func(get_local_fn_by_rnk(rnk));
+                                    unsafe {
+                                        FUNC_TABLE[rnk] = addr;
+                                    }
+                                    drop(hotness);
+                                    ret = interpreter_call_asm(
+                                        addr,
+                                        args.len() as u64,
+                                        args.as_ptr() as u64,
+                                    );
+                                } else {
+                                    if hotness[&(rnk as u64)] >= 0 {
+                                        // functions with negative hotness will never be compiled
+                                        *hotness.get_mut(&(rnk as u64)).unwrap() += 1;
+                                    }
+                                    drop(hotness);
+                                    let func = get_local_fn_by_rnk(rnk);
+                                    let mut new_ctx = InterpreterContext::new();
+                                    func.parameters.iter().zip(call.arguments.iter()).for_each(
+                                        |(para, (arg, _))| {
+                                            let arg_val = ctx.get_operand(&arg);
+                                            new_ctx.virt_regs.insert(para.name.clone(), arg_val);
+                                        },
+                                    );
+                                    ret = interpret_func(func, &mut new_ctx);
+                                }
                             }
                         } else {
-                            let paras = call
-                                .arguments
-                                .iter()
-                                .map(|(op, _)| ctx.get_operand(op))
-                                .collect::<Vec<i64>>();
-                            let ret = interpret_extern_func(&name.to_string()[1..], paras);
-                            if let Some(dest) = &call.dest {
-                                ctx.virt_regs.insert(dest.clone(), ret);
-                            }
+                            // extern function
+                            ret = interpret_extern_func(name, args);
+                        }
+                        if let Some(dest) = &call.dest {
+                            ctx.virt_regs.insert(dest.clone(), ret);
                         }
                     }
                     _ => panic!("Unsupported function type"),
@@ -322,9 +351,7 @@ pub fn interpret_extern_func(name: &str, paras: Vec<i64>) -> i64 {
         0
     } else if name == "..printInt" {
         for para in paras.iter() {
-            unsafe {
-                print!("{}", *para);
-            }
+            print!("{}", *para);
         }
         0
     } else {

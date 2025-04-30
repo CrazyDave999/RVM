@@ -7,23 +7,32 @@ mod switch;
 pub mod up;
 
 use crate::interpreter::sign_extend;
-use crate::mem::get_local_fn_by_name;
+use crate::mem::{HOTNESS, get_local_fn_by_name, get_local_rnk};
 use interpreter::interpret_func;
 use llvm_ir::module::Module;
-use llvm_ir::{Constant, Type, TypeRef};
+use llvm_ir::{Constant, Instruction, Type};
 use mem::{FUNC, FUNC_NAME_RNK};
 use std::path::Path;
 use std::sync::Arc;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let module = Module::from_ir_path(Path::new("test.ll"))?;
-    for func in &module.functions {
-        let cur_size = FUNC.exclusive_access().len();
+    for (i, func) in module.functions.iter().enumerate() {
         FUNC.exclusive_access().push(Arc::from(func.clone()));
         FUNC_NAME_RNK
             .exclusive_access()
-            .insert(func.name.clone(), cur_size);
+            .insert(func.name.clone(), i);
     }
+    println!("Functions: ");
+    for (i, func) in module.functions.iter().enumerate() {
+        println!(
+            "{}, {}, {}",
+            i,
+            func.name,
+            get_local_rnk(&func.name).unwrap()
+        );
+    }
+    println!();
 
     // calculate total mem size that global vars need
     let mut global_var_size = 0usize;
@@ -56,7 +65,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // allocate mem for global vars
     let mut global_var_ptr = alloc::alloc_mem(global_var_size);
-    println!("Global var start at: {:x}, size: {}", global_var_ptr, global_var_size);
+    println!(
+        "Global var start at: {:x}, size: {}",
+        global_var_ptr, global_var_size
+    );
+    println!();
 
     // init global vars
     let mut global_inner = mem::GLOBAL_PTR.exclusive_access();
@@ -145,6 +158,49 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     drop(global_inner);
 
     let mut ctx = interpreter::InterpreterContext::new();
+
+    // prepare hotness, those with negative hotness will never be compiled
+    // 2 kinds of functions cannot be compiled
+    // 1. functions with phi/select
+    // 2. functions that call extern functions
+    let mut hotness = HOTNESS.exclusive_access();
+    for func in module.functions.iter() {
+        let rnk = get_local_rnk(&func.name).unwrap();
+        if &func.name == "main" {
+            hotness.insert(rnk as u64, -1);
+            continue;
+        }
+        let mut can_compile = true;
+        for basic_block in func.basic_blocks.iter() {
+            for inst in basic_block.instrs.iter() {
+                match inst {
+                    Instruction::Phi(_) | Instruction::Select(_) => {
+                        can_compile = false;
+                        break;
+                    }
+                    Instruction::Call(call) => {
+                        let func_name = &call.function.clone().right().unwrap().to_string()[1..];
+                        if let Some(_) = get_local_rnk(func_name) {
+                        } else {
+                            can_compile = false;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if !can_compile {
+                break;
+            }
+        }
+        if can_compile {
+            hotness.insert(rnk as u64, 0);
+        } else {
+            hotness.insert(rnk as u64, -1);
+        }
+    }
+    drop(hotness);
+
     let ret = interpret_func(get_local_fn_by_name("main").unwrap(), &mut ctx);
     println!("[RVM] main return: {:?}", ret);
     Ok(())
