@@ -21,7 +21,9 @@ __asm_call_fn:
 
 	# check if the target function has been compiled
 	slli t1, t0, 3 # offset
-	ld t1, FUNC_TABLE(t1) # load the func address
+	li t2, FUNC_TABLE
+	add t1, t1, t2
+	ld t1, 0(t1) # load the func address
 	bnez t1, __asm_call_asm
 
 __asm_call_interpreter:
@@ -51,7 +53,8 @@ __asm_call_interpreter:
 
 	# switch stack
 	call alloc_stack
-	addi sp, a0, 1024*16 # new stack top
+	li t2, 1024*16
+	add sp, a0, t2 # new stack top
 
 	# pub extern "C" fn asm_call_fn_handler(func_index: usize, ctx: *mut usize)
 	ld a0, 10*8(sp) # func index
