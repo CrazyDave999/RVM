@@ -21,7 +21,7 @@ __asm_call_fn:
 
 	# check if the target function has been compiled
 	slli t1, t0, 3 # offset
-	li t2, FUNC_TABLE
+	la t2, FUNC_TABLE
 	add t1, t1, t2
 	ld t1, 0(t1) # load the func address
 	bnez t1, __asm_call_asm
