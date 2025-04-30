@@ -2,7 +2,7 @@ use crate::up::UPSafeCell;
 use core::ptr;
 use lazy_static::lazy_static;
 /// stack allocator
-use libc::{MAP_ANONYMOUS, MAP_PRIVATE, PROT_READ, PROT_WRITE, mmap, munmap};
+use libc::{MAP_ANONYMOUS, MAP_PRIVATE, PROT_READ, PROT_WRITE, mmap, munmap, PROT_EXEC};
 pub const STACK_SIZE: usize = 1024 * 16;
 pub struct StackAllocator {
     stack_ptrs: Vec<u64>,
@@ -18,12 +18,13 @@ impl StackAllocator {
         unsafe {
             let addr = mmap(
                 ptr::null_mut(),
-                STACK_SIZE,
+                STACK_SIZE + 0x1000,
                 PROT_READ | PROT_WRITE,
                 MAP_PRIVATE | MAP_ANONYMOUS,
                 -1,
                 0,
             );
+            println!("alloc: addr: {:#x}", addr as u64);
             if addr == libc::MAP_FAILED {
                 panic!("Failed to allocate stack");
             }
@@ -62,11 +63,12 @@ pub fn alloc_mem(size: usize) -> u64 {
         let addr = mmap(
             ptr::null_mut(),
             size,
-            PROT_READ | PROT_WRITE,
+            PROT_READ | PROT_WRITE | PROT_EXEC,
             MAP_PRIVATE | MAP_ANONYMOUS,
             -1,
             0,
         );
+        println!("alloc_mem: size: {}, addr: {:#x}", size, addr as u64);
         if addr == libc::MAP_FAILED {
             panic!("Failed to allocate stack");
         }

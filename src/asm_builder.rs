@@ -999,6 +999,7 @@ pub fn compile_func(func: Arc<Function>) -> u64 {
     let binary = asm_builder.to_binary();
     let start_ptr = alloc_mem(binary.len() * 4); // will not dealloc this, until the program ends
 
+    println!("Function {} will be placed at: {:#x}", func.name, start_ptr);
     unsafe {
         ptr::copy_nonoverlapping(binary.as_ptr(), start_ptr as *mut u32, binary.len());
     }

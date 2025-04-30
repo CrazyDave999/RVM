@@ -25,9 +25,11 @@ __interpreter_call_asm:
 	mv s1, ra
 
 	# prepare space for para on stack
+	addi t4, x0, 8
+	blt t1, t4, __para_ok
 	addi t4, t1, -8
 	slli t4, t4, 3
-	add t3, t3, t4 # new_sp
+	sub t3, t3, t4 # new_sp
 
 	addi t4, x0, 8 # cur para
 __para_loop:

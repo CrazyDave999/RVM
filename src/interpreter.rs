@@ -277,6 +277,7 @@ pub fn interpret_inst(inst: &Instruction, ctx: &mut InterpreterContext) {
                             let addr = unsafe { FUNC_TABLE[rnk] };
                             if addr != 0 {
                                 // this function has been compiled
+                                println!("Calling a compiled function: {}", name);
                                 ret = interpreter_call_asm(
                                     addr,
                                     args.len() as u64,
@@ -287,11 +288,13 @@ pub fn interpret_inst(inst: &Instruction, ctx: &mut InterpreterContext) {
                                 let mut hotness = HOTNESS.exclusive_access();
                                 if hotness[&(rnk as u64)] >= 0 {
                                     // compile, then call its asm
+                                    println!("Compiling function: {}", name);
                                     let addr = compile_func(get_local_fn_by_rnk(rnk));
                                     unsafe {
                                         FUNC_TABLE[rnk] = addr;
                                     }
                                     drop(hotness);
+                                    println!("Calling a compiled function: {}", name);
                                     ret = interpreter_call_asm(
                                         addr,
                                         args.len() as u64,

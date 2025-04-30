@@ -1,5 +1,5 @@
 use std::arch::global_asm;
-use crate::alloc::{alloc_stack, dealloc_stack};
+use crate::alloc::{alloc_stack, dealloc_stack, STACK_SIZE};
 use crate::interpreter::{interpret_func, InterpreterContext};
 use crate::mem::{get_local_fn_by_rnk};
 
@@ -21,7 +21,10 @@ pub extern "C" fn asm_call_fn_handler(fn_index: u64, ctx: *mut u64) {
 }
 
 pub fn interpreter_call_asm(fn_ptr: u64, para_num: u64, para_ptr: u64) -> i64 {
-    let new_sp = alloc_stack();
+    let new_sp = alloc_stack() + STACK_SIZE as u64;
+    
+    println!("interpreter_call_asm: new_sp: {:#x}", new_sp);
+    
     unsafe extern "C" {
         fn __interpreter_call_asm(
             fn_ptr: u64,

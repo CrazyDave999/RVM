@@ -7,3 +7,7 @@ edition = "2024"
 lazy_static = { version = "1.4.0", features = ["spin_no_std"] }
 libc = "0.2"
 llvm-ir = { version = "0.11.3", features = ["llvm-18"] }
+
+[profile.release]
+debug = true
+opt-level = 0
