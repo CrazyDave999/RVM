@@ -6,7 +6,7 @@ use llvm_ir::{Function, Name, Operand, Terminator};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-pub const CRITICAL_HOTNESS: i64 = 0;
+pub const CRITICAL_HOTNESS: i64 = 1;
 
 pub struct InterpreterContext {
     pub virt_regs: HashMap<Name, i64>,
