@@ -34,9 +34,12 @@ impl StackAllocator {
     }
     pub fn dealloc(&mut self) {
         if let Some(addr) = self.stack_ptrs.pop() {
+            println!("dealloc: addr: {:#x}", addr);
             unsafe {
                 munmap(addr as *mut libc::c_void, STACK_SIZE);
             }
+        } else {
+            panic!("Nothing to deallocate!");
         }
     }
 }

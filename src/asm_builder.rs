@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 global_asm!(include_str!("asm_call.S"));
 unsafe extern "C" {
-    fn __asm_call_fn() -> i64;
+    pub fn __asm_call_fn() -> i64;
 }
 
 static PHY_REGS: [&'static str; 32] = [
@@ -260,7 +260,7 @@ impl ASMInst {
                         res.extend(Self::li("t0", fn_index as i64));
 
                         // call the asm func: __asm_call_fn
-                        // res.extend(Self::li("t1", __asm_call_fn as i64));
+                        res.extend(Self::li("t1", __asm_call_fn as i64));
                         res.extend(Self::i_type("jalr", "ra", "t1", 0));
 
                         // store the return value
@@ -377,7 +377,7 @@ impl ASMInst {
             }
             InstType::L => {
                 format!(
-                    "{} {}, {}({})\n", 
+                    "{} {}, {}({})\n",
                     self.name, self.rd.0, self.imm, self.rs1.0
                 )
             }
@@ -394,16 +394,10 @@ impl ASMInst {
                 )
             }
             InstType::U => {
-                format!(
-                    "{} {}, {}\n",
-                    self.name, self.rd.0, self.imm
-                )
+                format!("{} {}, {}\n", self.name, self.rd.0, self.imm)
             }
             InstType::J => {
-                format!(
-                    "{} {}, {}\n",
-                    self.name, self.rd.0, self.imm as i32
-                )
+                format!("{} {}, {}\n", self.name, self.rd.0, self.imm as i32)
             }
         }
     }
@@ -510,20 +504,36 @@ impl ASMInst {
 
     /// implement li pseudo inst manually \
     /// will use t6 \
-    /// 6 asm insts in the worst case
+    /// 8 asm insts in the worst case
     pub fn li(rd: &'static str, imm: i64) -> Vec<Self> {
         let mut res = Vec::new();
         if imm >= -2048 && imm <= 2047 {
             res.extend(Self::i_type("addi", rd, "x0", imm));
         } else if imm >= -2147483648 && imm <= 2147483647 {
-            res.extend(Self::u_type("lui", rd, imm));
-            res.extend(Self::addi(rd, rd, imm & 0xFFF));
+            let mut p1 = imm;
+            let p2 = sign_extend(12, (imm & 0xFFF) as u64);
+            if p2 < 0 {
+                p1 += 0x1000;
+            }
+            res.extend(Self::u_type("lui", rd, p1));
+            res.extend(Self::addi(rd, rd, p2));
         } else {
-            let (high, low) = (((imm as u64) >> 32) as i64, imm & 0xFFFF_FFFF);
-            res.extend(Self::li(rd, high));
-            res.extend(Self::i_type("slli", rd, rd, 32));
-            res.extend(Self::li("t6", low));
-            res.extend(Self::r_type("add", rd, rd, "t6"));
+            let mut p1 = imm >> 32;
+            let p2 = sign_extend(12, (imm & 0x0000_0FFF_0000_0000) as u64 >> 32);
+            if p2 < 0 {
+                p1 += 0x1000; // if p2 is negative and sign-extended, add more 0x1000 to p1 to cancel the extended value
+            }
+            let p3 = (imm & 0x0000_0000_FFE0_0000) >> 21;
+            let p4 = (imm & 0x0000_0000_001F_FC00) >> 10;
+            let p5 = imm & 0x0000_0000_0000_03FF;
+            res.extend(Self::u_type("lui", rd, p1));
+            res.extend(Self::i_type("addi", rd, rd, p2));
+            res.extend(Self::i_type("slli", rd, rd, 11));
+            res.extend(Self::i_type("addi", rd, rd, p3));
+            res.extend(Self::i_type("slli", rd, rd, 11));
+            res.extend(Self::i_type("addi", rd, rd, p4));
+            res.extend(Self::i_type("slli", rd, rd, 10));
+            res.extend(Self::i_type("addi", rd, rd, p5));
         }
         res
     }
@@ -644,7 +654,7 @@ impl ASMInst {
             rs2: PhyReg("x0"),
             rd: PhyReg(rd),
             ty: InstType::U,
-            imm: imm as u32,
+            imm: imm as u32 & 0xFFFF_F000,
         });
         res
     }
@@ -813,7 +823,7 @@ impl ASMContext {
                     .insert(para.name.clone(), PhyReg(PHY_REGS[i + 10]));
             } else {
                 ctx.local_vars
-                    .insert(para.name.clone(), ctx.stack_size + i as u64 * 8);
+                    .insert(para.name.clone(), ctx.stack_size + (i - 8) as u64 * 8);
             }
         }
 

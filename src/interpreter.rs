@@ -33,7 +33,9 @@ impl InterpreterContext {
                 }
                 _ => panic!("Unsupported constant type"),
             },
-            Operand::LocalOperand { name, .. } => *self.virt_regs.get(name).unwrap(),
+            Operand::LocalOperand { name, .. } => *self.virt_regs.get(name).unwrap_or_else(||{
+                panic!("Virtual register not found: {}", name)
+            }),
             _ => {
                 panic!("Unsupported operand type");
             }
