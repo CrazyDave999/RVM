@@ -31,6 +31,7 @@ __asm_call_interpreter:
 	addi sp, sp, -8*32
 	sd ra, 1*8(sp) # next pc
 	sd sp, 2*8(sp)
+	sd t0, 5*8(sp) # func index
 
 	.set n, 10
 	.rept 8
