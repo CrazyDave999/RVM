@@ -12,7 +12,7 @@ pub extern "C" fn asm_call_fn_handler(fn_index: u64, ctx: *mut u64) {
     let func = get_local_fn_by_rnk(fn_index as usize);
     let mut args = Vec::new();
     let mut int_ctx = InterpreterContext::new();
-    
+
     // prepare paras
     for (i, para) in func.parameters.iter().enumerate() {
         let offset = if i < 8 { i + 10 } else { i - 8 + 32 };
@@ -33,13 +33,17 @@ pub extern "C" fn asm_call_fn_handler(fn_index: u64, ctx: *mut u64) {
         }
 
         println!("Calling a compiled function: {}", name);
-        interpreter_call_asm(addr, args.len() as u64, args.as_ptr() as u64)
+        let para_num = args.len() as u64;
+        if args.len() < 8 {
+            args.resize(8, 0);
+        }
+        interpreter_call_asm(addr, para_num, args.as_ptr() as u64)
     } else {
         if hotness[&fn_index] >= 0 {
             *hotness.get_mut(&fn_index).unwrap() += 1;
         }
         drop(hotness);
-        
+
         interpret_func(func, &mut int_ctx)
     };
     println!("interpreter ret asm: ret: {}", ret);

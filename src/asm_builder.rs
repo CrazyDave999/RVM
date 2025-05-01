@@ -729,8 +729,19 @@ impl ASMInst {
                 if let Some(offset) = ctx.local_vars.get(name) {
                     Self::i_type("ld", rd, "sp", *offset as i64)
                 } else if let Some(ptr) = ctx.local_ptr_map.get(name) {
-                    let offset = ctx.local_ptrs.get(ptr).unwrap();
-                    Self::i_type("ld", rd, "sp", *offset as i64)
+                    // ptr maybe the dest of alloca or getelementptr
+                    if let Some(offset) = ctx.local_ptrs.get(ptr) {
+                        // ptr is the dest of alloca
+                        Self::i_type("ld", rd, "sp", *offset as i64)
+                    } else if let Some(offset) = ctx.local_vars.get(ptr) {
+                        // ptr is the dest of getelementptr
+                        let mut res = Vec::new();
+                        res.extend(Self::i_type("ld", rd, "sp", *offset as i64));
+                        res.extend(Self::i_type("ld", rd, rd, 0));
+                        res
+                    } else {
+                        panic!("Local ptr not found! ptr: {:?}, name: {:?}", ptr, name);
+                    }
                 } else if let Some(offset) = ctx.local_ptrs.get(name) {
                     Self::addi(rd, "sp", *offset as i64)
                 } else {

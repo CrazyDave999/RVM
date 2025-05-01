@@ -8,13 +8,13 @@ pub mod up;
 
 use crate::interpreter::sign_extend;
 use crate::mem::{HOTNESS, get_local_fn_by_name, get_local_rnk};
+use asm_builder::__asm_call_fn;
 use interpreter::interpret_func;
 use llvm_ir::module::Module;
 use llvm_ir::{Constant, Instruction, Type};
 use mem::{FUNC, FUNC_NAME_RNK};
 use std::path::Path;
 use std::sync::Arc;
-use asm_builder::__asm_call_fn;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let module = Module::from_ir_path(Path::new("test.ll"))?;
@@ -36,7 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     // calculate total mem size that global vars need
-    let mut global_var_size = 0usize;
+    let mut global_var_size = 8usize;
     for var in module.global_vars.iter() {
         match *var.ty {
             Type::IntegerType { .. } => {
@@ -70,10 +70,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Global var start at: {:x}, size: {}",
         global_var_ptr, global_var_size
     );
-    
+
     println!("__asm_call_fn is at: {:#x}", __asm_call_fn as u64);
     println!();
-    
 
     // init global vars
     let mut global_inner = mem::GLOBAL_PTR.exclusive_access();
@@ -178,7 +177,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for basic_block in func.basic_blocks.iter() {
             for inst in basic_block.instrs.iter() {
                 match inst {
-                    Instruction::Phi(_) | Instruction::Select(_) | Instruction::Mul(_) | Instruction::SDiv(_) | Instruction::UDiv(_)  => {
+                    Instruction::Phi(_)
+                    | Instruction::Select(_)
+                    | Instruction::Mul(_)
+                    | Instruction::SDiv(_)
+                    | Instruction::UDiv(_)
+                    | Instruction::SRem(_)
+                    | Instruction::URem(_) => {
                         can_compile = false;
                         break;
                     }

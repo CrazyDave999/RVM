@@ -271,11 +271,12 @@ pub fn interpret_inst(inst: &Instruction, ctx: &mut InterpreterContext) {
                 Operand::ConstantOperand(const_ref) => match &*const_ref {
                     Constant::GlobalReference { name, .. } => {
                         let name = &name.to_string()[1..];
-                        let args = call
+                        let mut args = call
                             .arguments
                             .iter()
                             .map(|(op, _)| ctx.get_operand(op))
                             .collect::<Vec<i64>>();
+                        let para_num = args.len() as u64;
                         let mut ret = 0;
                         if let Some(rnk) = get_local_rnk(name) {
                             // this name is some function like define i32 @func
@@ -283,11 +284,10 @@ pub fn interpret_inst(inst: &Instruction, ctx: &mut InterpreterContext) {
                             if addr != 0 {
                                 // this function has been compiled
                                 println!("Calling a compiled function: {}", name);
-                                ret = interpreter_call_asm(
-                                    addr,
-                                    args.len() as u64,
-                                    args.as_ptr() as u64,
-                                );
+                                if args.len() < 8 {
+                                    args.resize(8, 0);
+                                }
+                                ret = interpreter_call_asm(addr, para_num, args.as_ptr() as u64);
                             } else {
                                 // local function
                                 let mut hotness = HOTNESS.exclusive_access();
@@ -300,11 +300,11 @@ pub fn interpret_inst(inst: &Instruction, ctx: &mut InterpreterContext) {
                                     }
                                     drop(hotness);
                                     println!("Calling a compiled function: {}", name);
-                                    ret = interpreter_call_asm(
-                                        addr,
-                                        args.len() as u64,
-                                        args.as_ptr() as u64,
-                                    );
+                                    if args.len() < 8 {
+                                        args.resize(8, 0);
+                                    }
+                                    ret =
+                                        interpreter_call_asm(addr, para_num, args.as_ptr() as u64);
                                 } else {
                                     if hotness[&(rnk as u64)] >= 0 {
                                         // functions with negative hotness will never be compiled

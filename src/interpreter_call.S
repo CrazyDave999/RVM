@@ -2,6 +2,7 @@
 	.align 2
 __interpreter_call_asm:
 	# fn __interpreter_call_asm(fn_ptr: usize, para_num: usize, para_ptr: usize, new_sp: usize) -> isize
+	# note that para_ptr should have 8*8 bytes space for 8 parameters
 	mv t0, a0 # fn_ptr
 	mv t1, a1 # para_num
 	mv t2, a2 # para_ptr
