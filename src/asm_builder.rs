@@ -297,6 +297,12 @@ impl ASMInst {
             Terminator::Ret(ret) => {
                 if let Some(op) = &ret.return_operand {
                     res.extend(Self::get_operand("a0", op, ctx));
+                    res.extend(Self::i_type(
+                        "ld",
+                        "ra",
+                        "sp",
+                        *ctx.local_vars.get(&Name::from("#ra")).unwrap() as i64,
+                    ));
                     res.extend(Self::i_type("addi", "sp", "sp", ctx.stack_size as i64));
                     res.extend(Self::i_type("jalr", "x0", "ra", 0));
                 }
@@ -763,7 +769,9 @@ impl ASMContext {
         let para_num = func.parameters.len() as u64;
 
         // calculate stack size needed
+        ctx.stack_size += 8; // for ra
         ctx.stack_size += min(8, para_num) * 8; // for para protection
+
         let mut max_call_para_num = 0;
         for bb in func.basic_blocks.iter() {
             for inst in bb.instrs.iter() {
@@ -813,8 +821,12 @@ impl ASMContext {
         ctx.stack_size = (ctx.stack_size + 15) / 16 * 16; // align to 16
 
         // now get all offset
-        // get para offset
+        // get ra offset
         let mut cur_offset = ctx.stack_size - 8;
+        ctx.local_vars.insert(Name::from("#ra"), cur_offset);
+        cur_offset -= 8;
+
+        // get para offset
         for (i, para) in func.parameters.iter().enumerate() {
             if i < 8 {
                 ctx.local_vars.insert(para.name.clone(), cur_offset);
@@ -944,7 +956,18 @@ impl ASMBuilder {
     pub fn build(&mut self) {
         let mut inner = self.asm.borrow_mut();
         // prepare stack
-        inner.extend(ASMInst::addi("sp", "sp", -(self.ctx.stack_size as i64)));
+        inner.extend(ASMInst::i_type(
+            "addi",
+            "sp",
+            "sp",
+            -(self.ctx.stack_size as i64),
+        ));
+        inner.extend(ASMInst::s_type(
+            "sd",
+            "ra",
+            "sp",
+            *self.ctx.local_vars.get(&Name::from("#ra")).unwrap() as i64,
+        ));
 
         // store paras
         for (name, reg) in self.ctx.paras.iter() {
