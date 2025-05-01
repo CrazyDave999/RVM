@@ -6,6 +6,8 @@ use llvm_ir::{Function, Name, Operand, Terminator};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+pub const CRITICAL_HOTNESS: i64 = 0;
+
 pub struct InterpreterContext {
     pub virt_regs: HashMap<Name, i64>,
     pub stack: Vec<i64>,
@@ -33,9 +35,10 @@ impl InterpreterContext {
                 }
                 _ => panic!("Unsupported constant type"),
             },
-            Operand::LocalOperand { name, .. } => *self.virt_regs.get(name).unwrap_or_else(||{
-                panic!("Virtual register not found: {}", name)
-            }),
+            Operand::LocalOperand { name, .. } => *self
+                .virt_regs
+                .get(name)
+                .unwrap_or_else(|| panic!("Virtual register not found: {}", name)),
             _ => {
                 panic!("Unsupported operand type");
             }
@@ -288,7 +291,7 @@ pub fn interpret_inst(inst: &Instruction, ctx: &mut InterpreterContext) {
                             } else {
                                 // local function
                                 let mut hotness = HOTNESS.exclusive_access();
-                                if hotness[&(rnk as u64)] >= 0 {
+                                if hotness[&(rnk as u64)] >= CRITICAL_HOTNESS {
                                     // compile, then call its asm
                                     println!("Compiling function: {}", name);
                                     let addr = compile_func(get_local_fn_by_rnk(rnk));
@@ -340,27 +343,35 @@ pub fn interpret_inst(inst: &Instruction, ctx: &mut InterpreterContext) {
 }
 
 pub fn interpret_extern_func(name: &str, paras: Vec<i64>) -> i64 {
-    if name == "..print" {
-        for para in paras.iter() {
-            unsafe {
-                let mut p = (*para) as *const i64;
-                loop {
-                    if *p == 0 {
-                        break;
+    match name {
+        "..print" | "..println" => {
+            for para in paras.iter() {
+                unsafe {
+                    let mut p = (*para) as *const i64;
+                    loop {
+                        if *p == 0 {
+                            break;
+                        }
+                        print!("{}", (*p) as u8 as char);
+                        p = p.add(1);
                     }
-                    print!("{}", (*p) as u8 as char);
-                    p = p.add(1);
                 }
             }
+            if name == "..println" {
+                println!();
+            }
+            0
         }
-        0
-    } else if name == "..printInt" {
-        for para in paras.iter() {
-            print!("{}", *para);
+        "..printInt" | "..printlnInt" => {
+            for para in paras.iter() {
+                print!("{}", *para);
+            }
+            if name == "..printlnInt" {
+                println!();
+            }
+            0
         }
-        0
-    } else {
-        panic!("Undefined function");
+        _ => panic!("Undefined function"),
     }
 }
 

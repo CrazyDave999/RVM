@@ -1,5 +1,5 @@
 /.idea
 /target
-/test.ll
-/test.bc
-
+*.ll
+*.bc
+log
